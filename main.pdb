@@ -1,0 +1,58 @@
+:- use_module(library(http/http_client)).
+
+say((Context, _), Args) :-
+    eval_args(Context, Args, Strs),
+    forall(member(Str, Strs), write(Str)).
+
+http((Context, Res), Args) :-
+    eval_args(Context, Args, Strs),
+    reverse(Strs, RStrs),
+    foldl(string_concat, RStrs, "", Str),
+    http_get(Str, Res ,[]).
+
+with_args((Context, _), Args, [ArgNames,Bexes]) :-
+    compound_name_arguments(ArgNames, args, Names),
+    pairs_keys_values(KVPs, Names, Args),
+    NewContext = Context.put(KVPs),
+    bex(Bexes, NewContext).
+
+define((Context, NewContext), [Name|[Args|Values]]) :-
+    NewContext = Context.put(Name, with_args(Args, Values)).
+
+let((Context, NewContext), [Name,Arg]) :-
+    eval_arg(Context, Arg, EvalArg),
+    NewContext = Context.put(Name, EvalArg).
+
+run(Bex) :-
+    compound_name_arguments(Bex, bex, Args),
+    bex(Args, context{}).
+
+bex([], _).
+bex([Arg|Args], Context) :-
+    run((Context, Res), Arg),
+    is_dict(Res, context) -> bex(Args, Res); bex(Args, Context).
+    
+run((Context, Res), Arg) :-
+    compound_name_arguments(Arg, Name, Arguments),
+    ((Def = Context.get(Name), compound_name_arguments(Def, DefName, Extra)) ->
+        call(DefName, (Context, Res), Arguments, Extra);
+        call(Name, (Context, Res), Arguments)).
+
+eval_arg(Context, Arg, EvalArg) :-
+    atom(Arg) -> EvalArg = Context.get(Arg);
+    (string(Arg); integer(Arg)) -> EvalArg = Arg;
+    compound(Arg) -> run((Context, EvalArg), Arg).
+
+eval_args(Context, Args, EvalArgs) :-
+    maplist(eval_arg(Context), Args, EvalArgs).
+
+example() :-
+    run(bex(
+        let(format, "?format=4"),
+        define(hello, args(name, city),
+            say("Hello ", name, " from ", city, "!\n"),
+            say("Here is your weather in ",
+            http("https://wttr.in/", city, format))),
+        hello("Kaixi", "Portugal")
+    )).
+
